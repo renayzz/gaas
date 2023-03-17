@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 type SVGElement struct {
 	Type      string
 	Attrs     map[string]string
+	Text      string
 	LinkedTo  *SVGElement
 	LinkStyle string
 }
@@ -68,15 +70,37 @@ func main() {
 
 			// Add the element to the slice
 			elements = append(elements, currentElement)
+
+		case xml.CharData:
+			// Store the text of the current element
+			if currentElement != nil {
+				currentElement.Text = string(t)
+			}
 		}
 	}
 
-	// Print the results
+	// Create a JSON array with the results
+	var result []map[string]string
+
 	for _, element := range elements {
-		fmt.Printf("%s element found\n", element.Type)
+		item := map[string]string{
+			"type": element.Type,
+			"text": element.Text,
+		}
 
 		if element.LinkedTo != nil {
-			fmt.Printf("  Linked to %s element with style %s\n", element.LinkedTo.Type, element.LinkStyle)
+			item["linked_to"] = element.LinkedTo.Type
+			item["link_style"] = element.LinkStyle
 		}
+
+		result = append(result, item)
 	}
+
+	// Output the JSON array to standard output
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(jsonData))
 }
