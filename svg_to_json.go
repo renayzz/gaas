@@ -2,39 +2,31 @@ package main
 
 import (
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
-	"io/ioutil"
 	"os"
+
+	svg "github.com/ajstarks/svgo"
 )
 
-type Svg struct {
-	XMLName xml.Name `xml:"svg"`
-	Texts   []Text   `xml:"text"`
-	Arrows  []Arrow  `xml:"path"`
-}
-
 type Text struct {
-	XMLName  xml.Name `xml:"text"`
-	X        string   `xml:"x,attr"`
-	Y        string   `xml:"y,attr"`
-	FontSize string   `xml:"font-size,attr"`
-	Fill     string   `xml:"fill,attr"`
-	Content  string   `xml:",chardata"`
+	X        int    `xml:"x,attr"`
+	Y        int    `xml:"y,attr"`
+	FontSize int    `xml:"font-size,attr"`
+	Fill     string `xml:"fill,attr"`
+	Content  string `xml:",chardata"`
 }
 
 type Arrow struct {
-	XMLName xml.Name `xml:"path"`
-	Start   string   `xml:"d,attr"`
-	End     string   `xml:"marker-end,attr"`
+	Start string `xml:"d,attr"`
+	End   string `xml:"marker-end,attr"`
 }
 
 type Form struct {
 	ID     string `json:"id"`
-	X      string `json:"x"`
-	Y      string `json:"y"`
-	Width  string `json:"width"`
-	Height string `json:"height"`
+	X      int    `json:"x"`
+	Y      int    `json:"y"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
 }
 
 type TextJson struct {
@@ -67,35 +59,49 @@ func main() {
 	}
 	defer svgFile.Close()
 
-	svgBytes, err := ioutil.ReadAll(svgFile)
-	if err != nil {
-		fmt.Println("Error reading file:", err)
-		return
-	}
+	var texts []TextJson
+	var arrows []ArrowJson
 
-	var svg Svg
-	err = xml.Unmarshal(svgBytes, &svg)
+	svgObj := svg.New(os.Stdout)
+	svgObj.Start(500, 500)
+
+	err = svgObj.Parse(svgFile)
 	if err != nil {
 		fmt.Println("Error parsing SVG:", err)
 		return
 	}
 
-	var texts []TextJson
-	for i, text := range svg.Texts {
-		form := Form{ID: fmt.Sprintf("form%d", i), X: text.X, Y: text.Y, Width: text.FontSize, Height: text.FontSize}
-		textJson := TextJson{ID: fmt.Sprintf("text%d", i), Content: text.Content, Form: form}
-		texts = append(texts, textJson)
+	for i, elem := range svgObj.Elements() {
+		switch elem := elem.(type) {
+		case svg.Text:
+			form := Form{
+				ID:     fmt.Sprintf("form%d", i),
+				X:      elem.X,
+				Y:      elem.Y,
+				Width:  elem.FontSize,
+				Height: elem.FontSize,
+			}
+			textJson := TextJson{
+				ID:      fmt.Sprintf("text%d", i),
+				Content: elem.Content,
+				Form:    form,
+			}
+			texts = append(texts, textJson)
+		case svg.Path:
+			start := elem.D
+			end := elem.MarkerEnd
+			arrowJson := ArrowJson{
+				Start: start,
+				End:   end,
+			}
+			arrows = append(arrows, arrowJson)
+		}
 	}
 
-	var arrows []ArrowJson
-	for i, arrow := range svg.Arrows {
-		start := arrow.Start
-		end := arrow.End
-		arrowJson := ArrowJson{Start: start, End: end}
-		arrows = append(arrows, arrowJson)
+	output := Output{
+		Texts:  texts,
+		Arrows: arrows,
 	}
-
-	output := Output{Texts: texts, Arrows: arrows}
 	jsonBytes, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
 		fmt.Println("Error generating JSON:", err)
