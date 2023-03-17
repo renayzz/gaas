@@ -1,10 +1,9 @@
 package main
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
-
-	svg "github.com/ajstarks/svgo"
 )
 
 type SVGElement struct {
@@ -29,40 +28,47 @@ func main() {
 	}
 	defer file.Close()
 
-	// Create new SVG decoder
-	decoder := svg.NewDecoder(file)
+	// Parse SVG file
+	decoder := xml.NewDecoder(file)
+	var elements []*SVGElement
+	var currentElement *SVGElement
 
-	// Parse SVG image
-	image, err := decoder.Decode()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	// Create a slice of SVG elements
-	elements := []*SVGElement{}
-
-	// Iterate over SVG elements
-	for _, element := range image.Children {
-		svgElement := &SVGElement{
-			Type:  element.XMLName.Local,
-			Attrs: element.Attr,
+	for {
+		// Read tokens from the XML document
+		token, err := decoder.Token()
+		if err != nil {
+			break
 		}
 
-		// Check if this element has a link
-		if link, ok := element.Attr["xlink:href"]; ok {
-			// Find the linked element
-			for _, linkedElement := range elements {
-				if linkedElement.Attrs["id"] == link {
-					svgElement.LinkedTo = linkedElement
-					linkedElement.LinkStyle = element.Attr["style"]
-					break
+		// Process the token
+		switch t := token.(type) {
+		case xml.StartElement:
+			// Create a new SVG element
+			currentElement = &SVGElement{
+				Type:  t.Name.Local,
+				Attrs: map[string]string{},
+			}
+
+			// Store the element attributes
+			for _, attr := range t.Attr {
+				currentElement.Attrs[attr.Name.Local] = attr.Value
+			}
+
+			// Check if this element has a link
+			if link, ok := currentElement.Attrs["xlink:href"]; ok {
+				// Find the linked element
+				for _, linkedElement := range elements {
+					if linkedElement.Attrs["id"] == link {
+						currentElement.LinkedTo = linkedElement
+						currentElement.LinkStyle = currentElement.Attrs["style"]
+						break
+					}
 				}
 			}
-		}
 
-		// Add the element to the slice
-		elements = append(elements, svgElement)
+			// Add the element to the slice
+			elements = append(elements, currentElement)
+		}
 	}
 
 	// Print the results
