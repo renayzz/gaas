@@ -2,9 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"strings"
+
+	"github.com/tdewolff/minify/v2"
+	"github.com/tdewolff/minify/v2/svg"
 )
 
 type SVGElement struct {
@@ -32,53 +36,67 @@ func main() {
 	defer file.Close()
 
 	// Parse SVG file
-	var svg struct {
-		XMLName xml.Name `xml:"svg"`
-		Elements []struct {
-			XMLName xml.Name
-			Text    string `xml:",chardata"`
-			Attrs   []struct {
-				Name  xml.Name
-				Value string
-			} `xml:",any"`
-			LinkedTo  string `xml:"http://www.w3.org/1999/xlink href,attr"`
-			LinkStyle string `xml:"style"`
-			ArrowType string `xml:"marker-end,attr"`
-		} `xml:",any"`
-	}
-
-	decoder := xml.NewDecoder(file)
-	if err := decoder.Decode(&svg); err != nil {
+	bytes, err := ioutil.ReadAll(file)
+	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	// Convert parsed SVG elements to our own SVGElement type
-	var elements []*SVGElement
-	for _, elem := range svg.Elements {
-		element := &SVGElement{
-			Type:  elem.XMLName.Local,
-			Attrs: make(map[string]string),
-			Text:  elem.Text,
-			LinkStyle: elem.LinkStyle,
-			ArrowType: elem.ArrowType,
-		}
+	m := minify.New()
+	m.AddFunc("image/svg+xml", svg.Minify)
 
-		for _, attr := range elem.Attrs {
-			element.Attrs[attr.Name.Local] = attr.Value
-		}
-
-		elements = append(elements, element)
+	minifiedBytes, err := m.Bytes("image/svg+xml", bytes)
+	if err != nil {
+		fmt.Println(err)
+		return
 	}
 
-	// Find linked elements
-	for _, element := range elements {
-		if element.LinkedTo != "" {
-			for _, linkedElement := range elements {
-				if linkedElement.Attrs["id"] == element.LinkedTo {
-					element.LinkedTo = linkedElement
-					break
+	var elements []*SVGElement
+	var currentElement *SVGElement
+
+	lines := strings.Split(string(minifiedBytes), "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		if strings.HasPrefix(line, "<") && strings.HasSuffix(line, ">") {
+			tag := strings.TrimPrefix(line, "<")
+			tag = strings.TrimSuffix(tag, ">")
+
+			if strings.HasPrefix(tag, "/") {
+				if currentElement != nil && strings.TrimPrefix(tag, "/") == currentElement.Type {
+					currentElement = currentElement.LinkedTo
 				}
+			} else {
+				parts := strings.Split(tag, " ")
+				element := &SVGElement{
+					Type:  parts[0],
+					Attrs: make(map[string]string),
+				}
+
+				for _, part := range parts[1:] {
+					kv := strings.Split(part, "=")
+					if len(kv) == 2 {
+						attrName := kv[0]
+						attrValue := strings.Trim(kv[1], "\"")
+						element.Attrs[attrName] = attrValue
+					}
+				}
+
+				if currentElement != nil {
+					element.LinkedTo = currentElement
+					currentElement = element
+				} else {
+					currentElement = element
+					elements = append(elements, element)
+				}
+			}
+		} else {
+			if currentElement != nil {
+				currentElement.Text += line
 			}
 		}
 	}
@@ -94,8 +112,8 @@ func main() {
 
 		if element.LinkedTo != nil {
 			item["linked_to"] = element.LinkedTo.Type
-			item["link_style"] = element.LinkStyle
-			item["arrow_type"] = element.ArrowType
+			item["link_style"] = element.LinkedTo.LinkStyle
+			item["arrow_type"] = element.LinkedTo.ArrowType
 		}
 
 		result = append(result, item)
