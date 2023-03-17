@@ -1,119 +1,76 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
 	svg "github.com/ajstarks/svgo"
 )
 
-type Text struct {
-	X        int    `xml:"x,attr"`
-	Y        int    `xml:"y,attr"`
-	FontSize int    `xml:"font-size,attr"`
-	Fill     string `xml:"fill,attr"`
-	Content  string `xml:",chardata"`
-}
-
-type Arrow struct {
-	Start string `xml:"d,attr"`
-	End   string `xml:"marker-end,attr"`
-}
-
-type Form struct {
-	ID     string `json:"id"`
-	X      int    `json:"x"`
-	Y      int    `json:"y"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
-}
-
-type TextJson struct {
-	ID      string `json:"id"`
-	Content string `json:"content"`
-	Form    Form   `json:"form"`
-}
-
-type ArrowJson struct {
-	Start string `json:"start"`
-	End   string `json:"end"`
-}
-
-type Output struct {
-	Texts  []TextJson  `json:"texts"`
-	Arrows []ArrowJson `json:"arrows"`
+type SVGElement struct {
+	Type      string
+	Attrs     map[string]string
+	LinkedTo  *SVGElement
+	LinkStyle string
 }
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Println("Usage: go run svg_analyzer.go <input_file.svg>")
+	// Check if SVG file path is provided
+	if len(os.Args) < 2 {
+		fmt.Println("Please provide an SVG file path")
 		return
 	}
 
-	inputFilePath := os.Args[1]
-	svgFile, err := os.Open(inputFilePath)
+	// Open SVG file
+	file, err := os.Open(os.Args[1])
 	if err != nil {
-		fmt.Println("Error opening file:", err)
+		fmt.Println(err)
 		return
 	}
-	defer svgFile.Close()
+	defer file.Close()
 
-	var texts []TextJson
-	var arrows []ArrowJson
+	// Create new SVG decoder
+	decoder := svg.NewDecoder(file)
 
-	svgObj := svg.New(os.Stdout)
-	svgObj.Start(500, 500)
-
-	err = svgObj.Parse(svgFile)
+	// Parse SVG image
+	image, err := decoder.Decode()
 	if err != nil {
-		fmt.Println("Error parsing SVG:", err)
+		fmt.Println(err)
 		return
 	}
 
-	for i, elem := range svgObj.Elements() {
-		switch elem := elem.(type) {
-		case svg.Text:
-			form := Form{
-				ID:     fmt.Sprintf("form%d", i),
-				X:      elem.X,
-				Y:      elem.Y,
-				Width:  elem.FontSize,
-				Height: elem.FontSize,
+	// Create a slice of SVG elements
+	elements := []*SVGElement{}
+
+	// Iterate over SVG elements
+	for _, element := range image.Children {
+		svgElement := &SVGElement{
+			Type:  element.XMLName.Local,
+			Attrs: element.Attr,
+		}
+
+		// Check if this element has a link
+		if link, ok := element.Attr["xlink:href"]; ok {
+			// Find the linked element
+			for _, linkedElement := range elements {
+				if linkedElement.Attrs["id"] == link {
+					svgElement.LinkedTo = linkedElement
+					linkedElement.LinkStyle = element.Attr["style"]
+					break
+				}
 			}
-			textJson := TextJson{
-				ID:      fmt.Sprintf("text%d", i),
-				Content: elem.Content,
-				Form:    form,
-			}
-			texts = append(texts, textJson)
-		case svg.Path:
-			start := elem.D
-			end := elem.MarkerEnd
-			arrowJson := ArrowJson{
-				Start: start,
-				End:   end,
-			}
-			arrows = append(arrows, arrowJson)
+		}
+
+		// Add the element to the slice
+		elements = append(elements, svgElement)
+	}
+
+	// Print the results
+	for _, element := range elements {
+		fmt.Printf("%s element found\n", element.Type)
+
+		if element.LinkedTo != nil {
+			fmt.Printf("  Linked to %s element with style %s\n", element.LinkedTo.Type, element.LinkStyle)
 		}
 	}
-
-	output := Output{
-		Texts:  texts,
-		Arrows: arrows,
-	}
-	jsonBytes, err := json.MarshalIndent(output, "", "  ")
-	if err != nil {
-		fmt.Println("Error generating JSON:", err)
-		return
-	}
-
-	outputFilePath := inputFilePath + ".json"
-	err = ioutil.WriteFile(outputFilePath, jsonBytes, 0644)
-	if err != nil {
-		fmt.Println("Error writing file:", err)
-		return
-	}
-
-	fmt.Printf("JSON output written to %s\n", outputFilePath)
 }
