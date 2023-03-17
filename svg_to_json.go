@@ -13,6 +13,7 @@ type SVGElement struct {
 	Text      string
 	LinkedTo  *SVGElement
 	LinkStyle string
+	ArrowType string
 }
 
 func main() {
@@ -63,6 +64,7 @@ func main() {
 					if linkedElement.Attrs["id"] == link {
 						currentElement.LinkedTo = linkedElement
 						currentElement.LinkStyle = currentElement.Attrs["style"]
+						currentElement.ArrowType = currentElement.Attrs["marker-end"]
 						break
 					}
 				}
@@ -91,6 +93,7 @@ func main() {
 		if element.LinkedTo != nil {
 			item["linked_to"] = element.LinkedTo.Type
 			item["link_style"] = element.LinkStyle
+			item["arrow_type"] = element.ArrowType
 		}
 
 		result = append(result, item)
