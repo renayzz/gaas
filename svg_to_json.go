@@ -2,11 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
-	"io/ioutil"
 	"os"
-
-	svg "github.com/ajstarks/svgo"
 )
 
 type SVGElement struct {
@@ -33,29 +31,52 @@ func main() {
 	}
 	defer file.Close()
 
-	data, err := os.ReadAll(file)
-	if err != nil {
+	// Parse SVG file
+	var svg struct {
+		XMLName xml.Name `xml:"svg"`
+		Elements []struct {
+			XMLName xml.Name
+			Text    string `xml:",chardata"`
+			Attrs   []struct {
+				Name  xml.Name
+				Value string
+			} `xml:",any"`
+			LinkedTo  string `xml:"http://www.w3.org/1999/xlink href,attr"`
+			LinkStyle string `xml:"style"`
+			ArrowType string `xml:"marker-end,attr"`
+		} `xml:",any"`
+	}
+
+	decoder := xml.NewDecoder(file)
+	if err := decoder.Decode(&svg); err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	// Parse SVG using svgo
+	// Convert parsed SVG elements to our own SVGElement type
 	var elements []*SVGElement
-	canvas := svg.New(&elements)
-	canvas.SetParser(svg.XMLParse)
-	canvas.SetIndent("", "  ")
-	canvas.Parse(data)
+	for _, elem := range svg.Elements {
+		element := &SVGElement{
+			Type:  elem.XMLName.Local,
+			Attrs: make(map[string]string),
+			Text:  elem.Text,
+			LinkStyle: elem.LinkStyle,
+			ArrowType: elem.ArrowType,
+		}
+
+		for _, attr := range elem.Attrs {
+			element.Attrs[attr.Name.Local] = attr.Value
+		}
+
+		elements = append(elements, element)
+	}
 
 	// Find linked elements
 	for _, element := range elements {
-		// Check if this element has a link
-		if link, ok := element.Attrs["xlink:href"]; ok {
-			// Find the linked element
+		if element.LinkedTo != "" {
 			for _, linkedElement := range elements {
-				if linkedElement.Attrs["id"] == link {
+				if linkedElement.Attrs["id"] == element.LinkedTo {
 					element.LinkedTo = linkedElement
-					element.LinkStyle = element.Attrs["style"]
-					element.ArrowType = element.Attrs["marker-end"]
 					break
 				}
 			}
