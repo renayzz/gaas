@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
+	"io/ioutil"
 	"os"
+
+	svg "github.com/ajstarks/svgo"
 )
 
 type SVGElement struct {
@@ -23,7 +25,7 @@ func main() {
 		return
 	}
 
-	// Open SVG file
+	// Read SVG file
 	file, err := os.Open(os.Args[1])
 	if err != nil {
 		fmt.Println(err)
@@ -31,52 +33,31 @@ func main() {
 	}
 	defer file.Close()
 
-	// Parse SVG file
-	decoder := xml.NewDecoder(file)
+	data, err := os.ReadAll(file)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Parse SVG using svgo
 	var elements []*SVGElement
-	var currentElement *SVGElement
+	canvas := svg.New(&elements)
+	canvas.SetParser(svg.XMLParse)
+	canvas.SetIndent("", "  ")
+	canvas.Parse(data)
 
-	for {
-		// Read tokens from the XML document
-		token, err := decoder.Token()
-		if err != nil {
-			break
-		}
-
-		// Process the token
-		switch t := token.(type) {
-		case xml.StartElement:
-			// Create a new SVG element
-			currentElement = &SVGElement{
-				Type:  t.Name.Local,
-				Attrs: map[string]string{},
-			}
-
-			// Store the element attributes
-			for _, attr := range t.Attr {
-				currentElement.Attrs[attr.Name.Local] = attr.Value
-			}
-
-			// Check if this element has a link
-			if link, ok := currentElement.Attrs["xlink:href"]; ok {
-				// Find the linked element
-				for _, linkedElement := range elements {
-					if linkedElement.Attrs["id"] == link {
-						currentElement.LinkedTo = linkedElement
-						currentElement.LinkStyle = currentElement.Attrs["style"]
-						currentElement.ArrowType = currentElement.Attrs["marker-end"]
-						break
-					}
+	// Find linked elements
+	for _, element := range elements {
+		// Check if this element has a link
+		if link, ok := element.Attrs["xlink:href"]; ok {
+			// Find the linked element
+			for _, linkedElement := range elements {
+				if linkedElement.Attrs["id"] == link {
+					element.LinkedTo = linkedElement
+					element.LinkStyle = element.Attrs["style"]
+					element.ArrowType = element.Attrs["marker-end"]
+					break
 				}
-			}
-
-			// Add the element to the slice
-			elements = append(elements, currentElement)
-
-		case xml.CharData:
-			// Store the text of the current element
-			if currentElement != nil {
-				currentElement.Text = string(t)
 			}
 		}
 	}
